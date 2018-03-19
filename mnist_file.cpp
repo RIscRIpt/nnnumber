@@ -6,6 +6,8 @@ mnist_file::mnist_file(std::string const &images_path, std::string const &labels
 
     images_file_.open(images_path, std::ifstream::in | std::ifstream::binary);
     labels_file_.open(labels_path, std::ifstream::in | std::ifstream::binary);
+
+    read_headers();
 }
 
 mnist_file::~mnist_file() {
@@ -49,13 +51,15 @@ void mnist_file::read_headers() {
 
     auto nbrows = read_uint32(images_file_);
     auto nbcols = read_uint32(images_file_);
-    assert_uint32(nbrows, digit_image::IMAGE_SIZE);
-    assert_uint32(nbcols, digit_image::IMAGE_SIZE);
+    assert_uint32(nbrows, digit_image::IMAGE_SIDE);
+    assert_uint32(nbcols, digit_image::IMAGE_SIDE);
 }
 
 digit_image mnist_file::next_image() {
     char label;
     labels_file_.read(&label, sizeof(label));
-    return digit_image(label);
+    auto image = digit_image(label);
+    image.read_pixels(images_file_);
+    return image;
 }
 
