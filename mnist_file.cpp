@@ -55,6 +55,11 @@ void mnist_file::read_headers() {
     assert_uint32(nbcols, digit_image::IMAGE_SIDE);
 }
 
+bool mnist_file::has_next_image() {
+    labels_file_.peek();
+    return !labels_file_.eof();
+}
+
 digit_image mnist_file::next_image() {
     char label;
     labels_file_.read(&label, sizeof(label));

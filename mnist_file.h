@@ -17,6 +17,7 @@ public:
     uint32_t read_uint32(std::istream &is);
     void assert_uint32(uint32_t test, uint32_t required);
     void read_headers();
+    bool has_next_image();
     digit_image next_image();
 
     static constexpr uint32_t const HEADER_LABEL_FILE = 0x801;

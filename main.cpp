@@ -1,57 +1,31 @@
-#include <iostream>
-#include <iomanip>
+#include "application.h"
 
-#include <unistd.h>
-
-#include <GL/gl.h>
-#include <GL/glext.h>
-#include <GL/glut.h>
-#include <GLFW/glfw3.h>
-
-#include "mnist_file.h"
-
-static void glfw_error_callback(int error, char const *description) {
-    std::cerr << "glfw error #" << error << ": " << description << std::endl;
-}
-
-int main() {
-    glfwSetErrorCallback(glfw_error_callback);
-
-    if (!glfwInit())
-        throw std::runtime_error("glfwInit failed");
-
-    glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
-    auto window = glfwCreateWindow(digit_image::IMAGE_SIDE, digit_image::IMAGE_SIDE, "NNnumber", NULL, NULL);
-    if (!window) {
-        glfwTerminate();
-        throw std::runtime_error("glfwCreateWindow failed");
+int main(int argc, char *argv[]) {
+    if (argc != 3) {
+        auto const program = argc > 0 ? argv[0] : "./nnnumbers";
+        std::cerr << "usage: " << program << " [train/inter/debug] coefficients\n";
+        return 1;
     }
 
-    glfwMakeContextCurrent(window);
+    srand(std::chrono::system_clock::now().time_since_epoch().count());
 
-    mnist_file train_file("images/train-images.idx3-ubyte", "images/train-labels.idx1-ubyte");
-    /* mnist_file test_file("images/t10k-images.idx3-ubyte", "images/t10k-labels.idx1-ubyte"); */
+    std::string str_mode = argv[1];
+    std::string coefficients_path = argv[2];
 
-    while (!glfwWindowShouldClose(window)) {
-        int width, height;
-        glfwGetFramebufferSize(window, &width, &height);
-
-        glClearColor(0, 0, 0, 1);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        auto image = train_file.next_image();
-        std::cout << image.label() << std::endl;
-        glPixelZoom(1.0, -1.0);
-        glRasterPos2f(0.5, 1);
-        glDrawPixels(digit_image::IMAGE_SIDE, digit_image::IMAGE_SIDE, GL_RED, GL_FLOAT, image.pixels().data());
-
-        glfwSwapBuffers(window);
-        glfwPollEvents();
-
-        sleep(1);
+    Application::mode mode;
+    if (str_mode == "train") {
+        mode = Application::mode::training;
+    } else if (str_mode == "inter") {
+        mode = Application::mode::interactive;
+    } else if (str_mode == "debug") {
+        mode = Application::mode::debugging;
+    } else {
+        std::cerr << "invalid mode." << std::endl;
+        return 1;
     }
 
-    glfwTerminate();
+    Application app(argc, argv, mode, coefficients_path);
+    app.run();
 
     return 0;
 }

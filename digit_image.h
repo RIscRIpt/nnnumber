@@ -10,16 +10,14 @@ public:
     static constexpr size_t const IMAGE_SIDE = 28;
     static constexpr size_t const IMAGE_SIZE = IMAGE_SIDE * IMAGE_SIDE;
 
-    using pixels_t = Eigen::Matrix<float, IMAGE_SIDE, IMAGE_SIDE>;
-
-    digit_image(char label);
+    digit_image(char digit);
     void read_pixels(std::istream &is);
 
-    char label() const { return label_; }
-    pixels_t const& pixels() const { return *pixels_; }
+    int digit() const { return digit_; }
+    Eigen::MatrixXf const& pixels() const { return pixels_; }
 
 private:
-    char label_;
-    std::unique_ptr<pixels_t> pixels_;
+    int digit_;
+    Eigen::MatrixXf pixels_;
 };
 
