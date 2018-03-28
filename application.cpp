@@ -11,6 +11,7 @@ Application::Application(int argc, char *argv[], mode mode, std::string const &c
     : argc_(argc)
     , argv_(argv)
     , mode_(mode)
+    , nn_(0.1f, 5, digit_image::IMAGE_SIZE, 20, 20, 20, 10)
     , coefficients_path_(coefficients_path)
     , random_engine_(std::chrono::system_clock::now().time_since_epoch().count())
     , training_on_digit_(-1)
@@ -62,16 +63,22 @@ void Application::read_images() {
         random_mnist_image_[i] = std::uniform_int_distribution<size_t>(0, mnist_images_[i].size() - 1);
 }
 
-Eigen::MatrixXf Application::get_digit_pixels_from_points() {
-    Eigen::MatrixXf pixels = Eigen::MatrixXf::Zero(digit_image::IMAGE_SIZE, 1);
+void Application::resize_points() {
     float width = points_bottom_right_.x - points_top_left_.x;
     float height = points_bottom_right_.y - points_top_left_.y;
+    float size_coef = 2.0f / 3.0f;
     point src_center(points_top_left_.x + width / 2, points_top_left_.y + height / 2);
     point dest_center(digit_image::IMAGE_SIDE / 2.0f, digit_image::IMAGE_SIDE / 2.0f);
-    float coef = (digit_image::IMAGE_SIDE - 1) / std::max(width, height);
+    float coef = size_coef * (digit_image::IMAGE_SIDE - 1) / std::max(width, height);
     for (auto &point : points_) {
         point.x = dest_center.x + coef * (point.x - src_center.x);
         point.y = dest_center.y + coef * (point.y - src_center.y);
+    }
+}
+
+Eigen::MatrixXf Application::get_digit_pixels_from_points() {
+    Eigen::MatrixXf pixels = Eigen::MatrixXf::Zero(digit_image::IMAGE_SIZE, 1);
+    for (auto &point : points_) {
         size_t x = std::floor(point.x);
         size_t y = std::floor(point.y);
         size_t coeff = x + y * digit_image::IMAGE_SIDE;
@@ -93,31 +100,53 @@ Eigen::MatrixXf Application::get_digit_pixels_from_points() {
     return pixels;
 }
 
-void Application::train_on_digit() {
-    auto const pixels = get_digit_pixels_from_points();
+void Application::draw_digit_to_stdout(Eigen::MatrixXf const &pixels) {
+    std::cout << '+';
     for (size_t col = 0; col < digit_image::IMAGE_SIDE; col++) {
-        for (size_t row = 0; row < digit_image::IMAGE_SIDE; row++) {
-            float pixel = pixels.coeff(row + col * digit_image::IMAGE_SIDE);
-            if (pixel > 0.0) {
+        std::cout << '-';
+    }
+    std::cout << "+\n";
+    for (size_t row = 0; row < digit_image::IMAGE_SIDE; row++) {
+        std::cout << '|';
+        for (size_t col = 0; col < digit_image::IMAGE_SIDE; col++) {
+            float pixel = pixels.coeff(col + row * digit_image::IMAGE_SIDE);
+            if (pixel > 0.9f) {
                 std::cout << 'X';
+            } else if (pixel > 0.5) {
+                std::cout << 'x';
+            } else if (pixel > 0.25) {
+                std::cout << 'o';
+            } else if (pixel > 0.0) {
+                std::cout << '.';
             } else {
                 std::cout << ' ';
             }
         }
-        std::cout << '\n';
+        std::cout << "|\n";
     }
-    std::cout << "Before:\n" << nn_.feed_forward(pixels) << "\n\n";
-    nn_.train({training_on_digit_}, pixels);
-    std::cout << "After:\n" << nn_.feed_forward(pixels) << "\n\n";
+    std::cout << '+';
+    for (size_t col = 0; col < digit_image::IMAGE_SIDE; col++) {
+        std::cout << '-';
+    }
+    std::cout << "+\n";
+}
+
+void Application::train_on_digit() {
+    auto const pixels = get_digit_pixels_from_points();
+    draw_digit_to_stdout(pixels);
+    std::cout << "Before:\n" << nn_.feed_forward(pixels).format(Eigen::IOFormat(4)) << "\n\n";
+    nn_.train(training_on_digit_, pixels);
+    std::cout << "After:\n" << nn_.feed_forward(pixels).format(Eigen::IOFormat(4)) << "\n\n";
 
     training_on_digit_ = -1;
 }
 
 void Application::recognize_digit() {
     auto const pixels = get_digit_pixels_from_points();
+    draw_digit_to_stdout(pixels);
     std::cout
         << '\n'
-        << nn_.feed_forward(pixels) << '\n'
+        << nn_.feed_forward(pixels).format(Eigen::IOFormat(4)) << '\n'
         << nn_.get_digit(pixels) << '\n';
 }
 
@@ -177,6 +206,7 @@ void Application::mouse(int button, int state, int x, int y, bool) {
                 points_.clear();
                 update_input_bounds(x, y);
             } else {
+                resize_points();
                 if (training_on_digit_ >= 0 && training_on_digit_ <= 9) {
                     train_on_digit();
                 } else {
@@ -207,17 +237,27 @@ void Application::keyboard(unsigned char key, int x, int y) {
 void Application::keyboard(unsigned char key, int, int, bool) {
     switch (key) {
     case 'x':
+        std::cout << "exiting & saving coefficients" << std::endl;
         write_coefficients();
     case 'q':
         exit(2);
         break;
+    case 'f':
+        std::cout << "fixing ...\n";
+        fixing_input_ = true;
+        break;
     case 'c':
         training_on_digit_ = -1;
-        std::cout << "training cancelled.\n";
+        fixing_input_ = false;
+        std::cout << "training & fixing cancelled.\n";
         break;
     case '0' ... '9':
         training_on_digit_ = key - '0';
         std::cout << "trainging on digit " << training_on_digit_ << '\n';
+        if (fixing_input_) {
+            train_on_digit();
+            fixing_input_ = false;
+        }
         break;
     }
 }
@@ -226,13 +266,12 @@ void Application::read_coefficients() {
     std::ifstream coefficients(coefficients_path_, std::ifstream::in);
     if (coefficients.is_open()) {
         coefficients.exceptions(std::ifstream::badbit | std::ifstream::failbit);
-        nn_.initialize_coefficients(coefficients);
+        nn_.read_coefficients(coefficients);
         coefficients.close();
     } else {
         if (mode_ != mode::training) {
             throw std::runtime_error("failed to open coefficients file");
         }
-        nn_.initialize_coefficients();
     }
 }
 
@@ -251,27 +290,38 @@ digit_image const& Application::get_random_image(int digit) {
 void Application::run_training() {
     read_images();
 
-    for (size_t epoch = 0; epoch < 10; epoch++) {
+    std::vector<digit_image const*> test_set;
+    for (size_t tests = 0; tests < 100; tests++) {
+        for (size_t digit = 0; digit < 10; digit++) {
+            auto const &image = get_random_image(digit);
+            test_set.push_back(&image);
+        }
+    }
+
+    size_t epoch = 0;
+    float rmse;
+    do {
+        nn_.set_learning_rate(std::pow(0.99f, epoch));
         for (size_t trainings = 0; trainings < 1000; trainings++) {
             for (size_t digit = 0; digit < 10; digit++) {
                 auto const &image = get_random_image(digit);
-                nn_.train({image.digit()}, image.pixels());
+                nn_.train(image.digit(), image.pixels());
             }
         }
-        float rmse = 0.0f;
+        rmse = 0.0f;
         size_t correct = 0;
-        for (size_t tests = 0; tests < 10; tests++) {
-            for (size_t digit = 0; digit < 10; digit++) {
-                auto const &image = get_random_image(digit);
-                if (nn_.get_digit(image.pixels()) == image.digit())
-                    correct++;
-                auto error = nn_.get_error(image.digit(), image.pixels());
-                rmse += error.cwiseProduct(error).sum();
-            }
+        for (auto const image : test_set) {
+            if (nn_.get_digit(image->pixels()) == image->digit())
+                correct++;
+            auto error = nn_.get_error(image->digit(), image->pixels());
+            rmse += error.cwiseProduct(error).sum();
         }
-        rmse = std::sqrt(rmse / 100.0f);
-        std::cout << correct << '\t' << rmse << '\n';
-    }
+        rmse = std::sqrt(rmse / test_set.size());
+        std::cout << '[' << epoch << "]\t" << nn_.get_learning_rate() << '\t' << correct << '\t' << rmse << '\n';
+        epoch++;
+    } while (rmse > 0.2f && epoch < 100);
+
+    write_coefficients();
 }
 
 void Application::initialize_gui() {
@@ -302,26 +352,12 @@ void Application::run_debugging() {
         std::cin >> digit;
         if (digit < 0 || digit > 9)
             continue;
+        if (std::cin.eof())
+            break;
 
         auto const &image = get_random_image(digit);
         int recognized = nn_.get_digit(image.pixels());
-        for (int row = 0; row < 28; row++) {
-            for (int col = 0; col < 28; col++) {
-                float pixel = image.pixels().coeff(col + row * digit_image::IMAGE_SIDE);
-                if (pixel > 0.9f) {
-                    std::cout << 'X';
-                } else if (pixel > 0.5) {
-                    std::cout << 'x';
-                } else if (pixel > 0.25) {
-                    std::cout << 'o';
-                } else if (pixel > 0.0) {
-                    std::cout << '.';
-                } else {
-                    std::cout << ' ';
-                }
-            }
-            std::cout << '\n';
-        }
+        draw_digit_to_stdout(image.pixels());
         std::cout << recognized << '\n';
     }
 }

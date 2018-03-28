@@ -60,9 +60,11 @@ private:
     void read_coefficients();
     void write_coefficients();
 
+    void resize_points();
     Eigen::MatrixXf get_digit_pixels_from_points();
     void train_on_digit();
     void recognize_digit();
+    void draw_digit_to_stdout(Eigen::MatrixXf const &pixels);
 
     void update_input_bounds(float x, float y);
     void reset_input_bounds();
@@ -86,5 +88,6 @@ private:
     std::vector<point> points_;
 
     int training_on_digit_;
+    bool fixing_input_;
 };
 

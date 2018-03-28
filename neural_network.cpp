@@ -1,7 +1,8 @@
 #include "neural_network.h"
 
-#include <cassert>
 #include <stdexcept>
+#include <cstdarg>
+#include <cassert>
 
 static Eigen::MatrixXf generate_right_answer(char number) {
     Eigen::MatrixXf y(10, 1);
@@ -41,6 +42,13 @@ void neural_network::read_matrix(Eigen::MatrixXf &matrix, std::istream &is) {
     matrix = Eigen::Map<Eigen::MatrixXf>(values.data(), matrix.cols(), matrix.rows()).transpose();
 }
 
+void neural_network::read_vector(Eigen::VectorXf &vector, std::istream &is) {
+    std::vector<float> values(vector.size());
+    for (auto &v : values)
+        is >> v;
+    vector = Eigen::Map<Eigen::VectorXf>(values.data(), vector.size());
+}
+
 float neural_network::sigmoid(float x) {
     return 1.0f / (1.0f + exp(-x));
 }
@@ -57,71 +65,52 @@ float neural_network::tanh_derivative(float x) {
     return 1.0f - std::tanh(x) * std::tanh(x);
 }
 
-neural_network::neural_network(float learning_rate)
-    : learning_rate(learning_rate)
+neural_network::neural_network(float learning_rate, int layers, ...)
+    : learning_rate_(learning_rate)
+    , layers_(layers)
 {
+    if (layers < 2)
+        throw std::out_of_range("minimum layer count is 2");
+
+    ws_.resize(layers_);
+    bs_.resize(layers_);
+
+    va_list sizes;
+    va_start(sizes, layers);
+    size_t input_layer_size = va_arg(sizes, size_t);
+    // 1-based indices
+    for (int i = 1; i < layers_; i++) {
+        size_t output_layer_size = va_arg(sizes, size_t);
+        ws_[i] = Eigen::MatrixXf::Random(output_layer_size, input_layer_size);
+        bs_[i] = Eigen::VectorXf::Random(output_layer_size);
+        input_layer_size = output_layer_size;
+    }
+    va_end(sizes);
 }
 
-void neural_network::initialize_coefficients() {
-    w_1 = Eigen::MatrixXf::Random(20, digit_image::IMAGE_SIZE);
-    w_2 = Eigen::MatrixXf::Random(20, 20);
-    w_3 = Eigen::MatrixXf::Random(20, 20);
-    w_4 = Eigen::MatrixXf::Random(10, 20);
+void neural_network::read_coefficients(std::istream &is) {
+    for (auto &w : ws_)
+        read_matrix(w, is);
 
-    b_1 = Eigen::MatrixXf::Random(20, 1);
-    b_2 = Eigen::MatrixXf::Random(20, 1);
-    b_3 = Eigen::MatrixXf::Random(20, 1);
-    b_4 = Eigen::MatrixXf::Random(10, 1);
-}
-
-void neural_network::initialize_coefficients(std::istream &is) {
-    w_1 = Eigen::MatrixXf(20, digit_image::IMAGE_SIZE);
-    w_2 = Eigen::MatrixXf(20, 20);
-    w_3 = Eigen::MatrixXf(20, 20);
-    w_4 = Eigen::MatrixXf(10, 20);
-
-    b_1 = Eigen::MatrixXf(20, 1);
-    b_2 = Eigen::MatrixXf(20, 1);
-    b_3 = Eigen::MatrixXf(20, 1);
-    b_4 = Eigen::MatrixXf(10, 1);
-
-    read_matrix(w_1, is);
-    read_matrix(w_2, is);
-    read_matrix(w_3, is);
-    read_matrix(w_4, is);
-
-    read_matrix(b_1, is);
-    read_matrix(b_2, is);
-    read_matrix(b_3, is);
-    read_matrix(b_4, is);
+    for (auto &b : bs_)
+        read_vector(b, is);
 }
 
 void neural_network::save_coefficients(std::ostream &os) {
-    os
-        << w_1 << '\n'
-        << w_2 << '\n'
-        << w_3 << '\n'
-        << w_4 << '\n'
-        << b_1 << '\n'
-        << b_2 << '\n'
-        << b_3 << '\n'
-        << b_4 << '\n';
+    for (auto &w : ws_)
+        os << w << '\n';
+
+    for (auto &b : bs_)
+        os << b << '\n';
 }
 
 Eigen::MatrixXf neural_network::feed_forward(Eigen::MatrixXf const &x) {
-    auto z_1 = w_1 * x + b_1;
-    auto a_1 = z_1.unaryExpr(&sigmoid);
-
-    auto z_2 = w_2 * a_1 + b_2;
-    auto a_2 = z_2.unaryExpr(&sigmoid);
-
-    auto z_3 = w_3 * a_2 + b_3;
-    auto a_3 = z_3.unaryExpr(&sigmoid);
-
-    auto z_4 = w_4 * a_3 + b_4;
-    auto a_4 = z_4.unaryExpr(&sigmoid);
-
-    return a_4;
+    auto a = x;
+    for (int layer = 1; layer < layers_; layer++) {
+        auto z = ws_[layer] * a + bs_[layer];
+        a = z.unaryExpr(&sigmoid);
+    }
+    return a;
 }
 
 int neural_network::get_digit(Eigen::MatrixXf const &x) {
@@ -136,63 +125,39 @@ Eigen::MatrixXf neural_network::get_error(int digit, Eigen::MatrixXf const &x) {
     return Ys[digit] - y;
 }
 
-void neural_network::train(std::vector<int> const &digits, Eigen::MatrixXf const &x) {
-    auto z_1 = w_1 * x + b_1;
-    auto a_1 = z_1.unaryExpr(&sigmoid);
+void neural_network::train(int digit, Eigen::MatrixXf const &x) {
+    std::vector<Eigen::MatrixXf> zs(layers_);
+    std::vector<Eigen::MatrixXf> as(layers_);
 
-    auto z_2 = w_2 * a_1 + b_2;
-    auto a_2 = z_2.unaryExpr(&sigmoid);
-
-    auto z_3 = w_3 * a_2 + b_3;
-    auto a_3 = z_3.unaryExpr(&sigmoid);
-
-    auto z_4 = w_4 * a_3 + b_4;
-    auto a_4 = z_4.unaryExpr(&sigmoid);
-
-    Eigen::MatrixXf ys(10, digits.size());
-    for (size_t i = 0; i < digits.size(); i++) {
-        auto digit = digits[i];
-        ys.col(i) = Ys[digit];
+    as[0] = x;
+    for (int layer = 1; layer < layers_; layer++) {
+        zs[layer] = ws_[layer] * as[layer - 1] + bs_[layer];
+        as[layer] = zs[layer].unaryExpr(&sigmoid);
     }
 
-    auto error_4 = ys - a_4;
-    auto delta_4 = error_4.cwiseProduct(z_4.unaryExpr(&sigmoid_derivative));
-    auto delta_w_4 = learning_rate * delta_4 * a_3.transpose();
-    auto delta_b_4 = learning_rate * delta_4 * 1.0f;
+    std::vector<Eigen::MatrixXf> dws(layers_);
+    std::vector<Eigen::MatrixXf> dbs(layers_);
 
-    auto error_3 = w_4.transpose() * delta_4;
-    auto delta_3 = error_3.cwiseProduct(z_3.unaryExpr(&sigmoid_derivative));
-    auto delta_w_3 = learning_rate * delta_3 * a_2.transpose();
-    auto delta_b_3 = learning_rate * delta_3 * 1.0f;
+    Eigen::MatrixXf error = Ys[digit] - as.back();
+    for (int layer = layers_ - 1; layer > 0; layer--) {
+        auto delta = error.cwiseProduct(zs[layer].unaryExpr(&sigmoid_derivative));
+        dws[layer] = learning_rate_ * delta * as[layer - 1].transpose();
+        dbs[layer] = learning_rate_ * delta * 1.0f;
+        if (layer > 1) // don't calculate when exiting the loop
+            error = ws_[layer].transpose() * delta;
+    }
 
-    auto error_2 = w_3.transpose() * delta_3;
-    auto delta_2 = error_2.cwiseProduct(z_2.unaryExpr(&sigmoid_derivative));
-    auto delta_w_2 = learning_rate * delta_2 * a_1.transpose();
-    auto delta_b_2 = learning_rate * delta_2 * 1.0f;
-
-    auto error_1 = w_2.transpose() * delta_2;
-    auto delta_1 = error_1.cwiseProduct(z_1.unaryExpr(&sigmoid_derivative));
-    auto delta_w_1 = learning_rate * delta_1 * x.transpose();
-    auto delta_b_1 = learning_rate * delta_1 * 1.0f;
-
-    w_1 += delta_w_1;
-    b_1 += delta_b_1;
-
-    w_2 += delta_w_2;
-    b_2 += delta_b_2;
-
-    w_3 += delta_w_3;
-    b_3 += delta_b_3;
-
-    w_4 += delta_w_4;
-    b_4 += delta_b_4;
+    for (int layer = 1; layer < layers_; layer++) {
+        ws_[layer] += dws[layer];
+        bs_[layer] += dbs[layer];
+    }
 }
 
 float neural_network::get_learning_rate() const {
-    return learning_rate;
+    return learning_rate_;
 }
 
 void neural_network::set_learning_rate(float rate) {
-    learning_rate = rate;
+    learning_rate_ = rate;
 }
 
