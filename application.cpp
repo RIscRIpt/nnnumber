@@ -11,7 +11,7 @@ Application::Application(int argc, char *argv[], mode mode, std::string const &c
     : argc_(argc)
     , argv_(argv)
     , mode_(mode)
-    , nn_(0.1f, 5, digit_image::IMAGE_SIZE, 20, 20, 20, 10)
+    , nn_(0.1f, 4, digit_image::IMAGE_SIZE, 196, 49, 10)
     , coefficients_path_(coefficients_path)
     , random_engine_(std::chrono::system_clock::now().time_since_epoch().count())
     , training_on_digit_(-1)
@@ -59,8 +59,6 @@ void Application::read_images() {
         images.clear();
     for (auto &&image : all_images)
         mnist_images_[image.digit()].emplace_back(std::move(image));
-    for (int i = 0; i < 10; i++)
-        random_mnist_image_[i] = std::uniform_int_distribution<size_t>(0, mnist_images_[i].size() - 1);
 }
 
 void Application::resize_points() {
@@ -284,7 +282,7 @@ void Application::write_coefficients() {
 }
 
 digit_image const& Application::get_random_image(int digit) {
-    return mnist_images_[digit][random_mnist_image_[digit](random_engine_)];
+    return mnist_images_[digit][random_(random_engine_) % mnist_images_[digit].size()];
 }
 
 void Application::run_training() {
@@ -301,7 +299,7 @@ void Application::run_training() {
     size_t epoch = 0;
     float rmse;
     do {
-        nn_.set_learning_rate(std::pow(0.99f, epoch));
+        nn_.set_learning_rate(1.0f / (1.0f + 0.5f * epoch));
         for (size_t trainings = 0; trainings < 1000; trainings++) {
             for (size_t digit = 0; digit < 10; digit++) {
                 auto const &image = get_random_image(digit);
@@ -319,7 +317,7 @@ void Application::run_training() {
         rmse = std::sqrt(rmse / test_set.size());
         std::cout << '[' << epoch << "]\t" << nn_.get_learning_rate() << '\t' << correct << '\t' << rmse << '\n';
         epoch++;
-    } while (rmse > 0.2f && epoch < 100);
+    } while (rmse > 0.2f && epoch < 300);
 
     write_coefficients();
 }

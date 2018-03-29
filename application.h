@@ -79,9 +79,7 @@ private:
     std::string coefficients_path_;
     std::default_random_engine random_engine_;
     std::vector<digit_image> mnist_images_[10];
-    std::uniform_int_distribution<size_t> random_mnist_image_[10];
-    std::vector<digit_image> inter_images_[10];
-    std::uniform_int_distribution<size_t> random_inter_image_[10];
+    std::uniform_int_distribution<size_t> random_;
 
     // manual_training, testing
     point points_top_left_, points_bottom_right_;
